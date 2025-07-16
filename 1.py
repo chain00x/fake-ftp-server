@@ -1,6 +1,7 @@
 from socket import *
 import threading
 import sys
+import time
 
 def get_host_ip():
     """ 获取本机 IP """
@@ -15,9 +16,15 @@ def get_host_ip():
 def epsv_handler(s_ext, conn):
     """ 处理 EPSV 数据连接 """
     try:
-        s_ext.bind(ADDR_EXT)
+        # 启用 SO_REUSEADDR
+        s_ext.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        # 绑定到随机端口 (0 表示让系统分配可用端口)
+        s_ext.bind((IP, 0))  # 动态分配端口
         s_ext.listen(1)
-        conn.send(b'229 Entering Extended Passive Mode (|||63568|)\r\n')  # 先发送 EPSV 响应
+        # 获取系统分配的端口
+        _, port = s_ext.getsockname()
+        # 发送 EPSV 响应，包含动态端口
+        conn.send(f'229 Entering Extended Passive Mode (|||{port}|)\r\n'.encode())
         conn_data, addr = s_ext.accept()
         print(f"[*] Data connection from {addr}")
         conn.send(b'150 Opening BINARY mode data connection.\r\n')
@@ -61,6 +68,10 @@ def handle_client(conn, addr, output_file=None):
                 s_ext = socket()
                 t = threading.Thread(target=epsv_handler, args=(s_ext, conn))
                 t.start()
+            elif msg.startswith('EPRT'):
+                conn.send(b'200 EPRT command successful.\r\n')
+            elif msg.startswith('PORT'):
+                conn.send(b'200 PORT command successful.\r\n')
             elif msg.startswith('CWD'):
                 dir_path = msg[4:].strip()
                 if dir_path:
@@ -71,7 +82,6 @@ def handle_client(conn, addr, output_file=None):
                 conn.send(b'250 Directory successfully changed.\r\n')
             elif msg.startswith('RETR'):
                 file_path = msg[5:].strip()
-                # 拼接完整路径
                 full_path = file_path if not current_directory else f"{current_directory}/{file_path}"
                 received_paths.append(full_path)
                 print(f"[+] Received RETR path: {full_path}")
@@ -108,13 +118,13 @@ if __name__ == '__main__':
     IP = get_host_ip()
     PORT = int(sys.argv[1])
     ADDR_MAIN = (IP, PORT)
-    ADDR_EXT = (IP, 63568)
 
-    print(f"[*] Listening on {IP}:{PORT} and {IP}:63568...")
+    print(f"[*] Listening on {IP}:{PORT}...")
 
     output_log = sys.argv[2] if len(sys.argv) > 2 else None
 
     server = socket()
+    server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)  # 启用 SO_REUSEADDR
     server.bind(ADDR_MAIN)
     server.listen(5)
 
